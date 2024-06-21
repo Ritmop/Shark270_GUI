@@ -8,6 +8,8 @@ import struct
 #                                                  Funciones de comunicación con el medidor
 #  ---------------------------------------------------------------------------------------------------------------------------------
 
+# reg2var
+
 def reg2var(registers,data_type):
     if(data_type == "TSTAMP"):
         tstamp_mask = 0x7f0f1f1f3f3f  
@@ -22,7 +24,7 @@ def reg2var(registers,data_type):
         minute = int(tstamp_str[8:10],16)
         second = int(tstamp_str[10:12],16)
         
-        return f"{day}/{month}/{year} {hour}:{minute}:{second}"
+        return f"{day:02}/{month:02}/20{year:02} {hour:02}:{minute:02}:{second:02}"
     
     elif(data_type == "UINT32"):
         packed_bytes = struct.pack('>I', (registers[0] << 16 | registers[1]))
@@ -82,8 +84,8 @@ def connect_shark270(server_address,host_ip,port):
             connect_wndw.withdraw()
         
         # Interpretación de los datos recibidos
-        meter_name = reg2var(id_request[0:9],"ASCII")
-        meter_SN   = reg2var(id_request[9:17],"ASCII")
+        meter_name = reg2var(id_request[0:8],"ASCII")
+        meter_SN   = reg2var(id_request[8:16],"ASCII")
         meter_type = reg2var(type_request,"ASCII")
         status_lbl.config(text=f"\n***** Conectado *****\n IP:\t{host_ip}:{port}\n Model:\t{meter_type}\n SN:\t{meter_SN}\n Name:\t{meter_name}")
         connect_btn.config(state="disabled")
@@ -103,19 +105,6 @@ def disconnect_shark270():
     client.close()
 
 def leer_shark270(start_address, address_count, format):
-    try:
-        # Verificar que el medidor esté disponible para una lectura
-        read_lock_status = client.read_holding_registers(9994,1,slave_address).registers[0]
-
-        # Si está disponible, bloquear el sistema de logs para evitar interferencias con otro software
-        if (read_lock_status == 0):
-            client.write_register(9994,10,slave_address)
-        else:
-            raise
-
-    except:
-        status_lbl.config(text=f"\nEl medidor se encuentra ocupado, intente de nuevo.")
-        polling_wndw.withdraw()
 
     try:
         # Obtener los registros solicitados.
@@ -158,15 +147,33 @@ def leer_shark270(start_address, address_count, format):
             data_str += f"\n{start_address+i}\t{bytes_value}\t\t{true_value}"  
         return_data_lbl.config(text=data_str)
 
-        # Desbloquear el sistema de logs
-        client.write_register(9994,10,slave_address)
-
     except Exception as e:
         status_lbl.config(text=f"Error durante lectura. {e}")
         polling_wndw.withdraw()
 
 def retlog_shark270():
     status_lbl.config(text=f"Retrieving...")
+
+    try:
+        # Verificar que el medidor esté disponible para una lectura
+        '''read_lock_status = client.read_holding_registers(9994,1,slave_address).registers[0]
+        print(read_lock_status)
+        # Si está disponible, bloquear el sistema de logs para evitar interferencias con otro software
+        # if (read_lock_status == 0):
+        client.write_register(9994,10,slave_address)
+        read_lock_status = client.read_holding_registers(9994,1,slave_address).registers[0]
+        print(read_lock_status)
+        #else:
+            #raise'''
+        # COM4
+        # Si el registro esta en hexadecimal en el manual, se le suma 1
+        #client.write_register(49999,0x280,slave_address)
+        client.write_registers(50000,[0x0D01,0,0])
+
+    except:
+        status_lbl.config(text=f"\nEl medidor se encuentra ocupado, intente de nuevo.")
+        polling_wndw.withdraw()
+
 
 
 #  ---------------------------------------------------------------------------------------------------------------------------------
