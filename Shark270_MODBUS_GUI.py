@@ -110,7 +110,7 @@ def leer_shark270(start_address, address_count, format):
         # Obtener los registros solicitados.
         true_value = ""
         data_request = client.read_holding_registers(start_address-1,address_count,slave_address).registers
-        data_str = f"\n#Reg\tData [Hex]\t{format}"        
+        data_str = f"\n#Reg\tData [Hex]\t\t{format}"        
 
         # Interpretación de los datos recibidos
         for i in range(len(data_request)):
@@ -144,8 +144,11 @@ def leer_shark270(start_address, address_count, format):
             else:
                 true_value = "   ↑" # Indicador que el registro actual es parte de un registro previo 
             
-            data_str += f"\n{start_address+i}\t{bytes_value}\t\t{true_value}"  
-        return_data_lbl.config(text=data_str)
+            data_str += f"\n{start_address+i}\t{bytes_value}\t\t{true_value}"            
+        return_data_lbl.config(state=tk.NORMAL)
+        return_data_lbl.delete(1.0, tk.END)
+        return_data_lbl.insert(tk.END,data_str)
+        return_data_lbl.config(state=tk.DISABLED)
 
     except Exception as e:
         status_lbl.config(text=f"Error durante lectura. {e}")
@@ -261,8 +264,11 @@ read_btn.grid(row=4,column=0)
 cancel_poll_btn = tk.Button(polling_wndw, text="Cancel", command=polling_wndw.withdraw)
 cancel_poll_btn.grid(row=4,column=1)
 
-return_data_lbl = tk.Label(polling_wndw,text="\nData output",justify="left")
+return_data_lbl = tk.Text(polling_wndw, width=40)
 return_data_lbl.grid(row=5,columnspan=2,sticky="w")
+scrollbar = tk.Scrollbar(polling_wndw, command=return_data_lbl.yview)
+scrollbar.grid(rowspan=5,column=2)
+return_data_lbl.config(yscrollcommand=scrollbar.set)
 
 # -----------------------------------     Ventana ret logs     -----------------------------------
 ret_log_wndw = tk.Tk()
