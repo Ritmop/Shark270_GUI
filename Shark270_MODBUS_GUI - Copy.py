@@ -203,13 +203,6 @@ def retlog_shark270():
                         status_lbl.config(text=f"\n /!\ El log no se ha acoplado correctamente.")
                         ret_log_wndw.withdraw()
                     else:
-                        # Buscar las variables almacenadas en el histórico
-                        #historic_vars = client.read_holding_registers()
-
-
-
-
-
                         # Obtener ventana
                         rec_per_window = 246//rec_size_bytes # División que redondea hacia abajo
                         num_repeats = 1
