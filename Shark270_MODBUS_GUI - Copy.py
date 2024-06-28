@@ -1,4 +1,5 @@
 import tkinter as tk
+from tkinter import ttk
 from pymodbus.client import ModbusTcpClient
 import struct
 import pandas as pd
@@ -73,10 +74,8 @@ def connect_shark270(server_address,host_ip,port):
         # Iniciar cliente
         global slave_address
         slave_address = server_address
-        global ip
-        ip = host_ip
         global client
-        client = ModbusTcpClient(host=ip,port=port)
+        client = ModbusTcpClient(host=host_ip,port=port)
         client.connect()
 
         # Secuencia de acceso
@@ -91,6 +90,7 @@ def connect_shark270(server_address,host_ip,port):
         
         # Interpretación de los datos recibidos
         meter_name = reg2var(id_request[0:8],"ASCII")
+        global meter_SN
         meter_SN   = reg2var(id_request[8:16],"ASCII")
         meter_type = reg2var(type_request,"ASCII")
         status_lbl.config(text=f"\n (!) Conectado\n IP:\t{host_ip}:{port}\n Model:\t{meter_type}\n SN:\t{meter_SN}\n Name:\t{meter_name}")
@@ -160,109 +160,225 @@ def leer_shark270(start_address, address_count, format):
         status_lbl.config(text=f"\n (X) Error durante la lectura de registros. {e}")
         polling_wndw.withdraw()
 
-def retlog_shark270():
-    try:
-        # Verificar que el medidor esté disponible para una lectura
+def retlog_shark270(log):
+    #try:
+    # Verificar que el medidor esté disponible para una lectura
+    meter_availability = client.read_holding_registers(0xC34B,1,slave_address).registers[0]
+    if(meter_availability == 0 or meter_availability == 0x0B00):            
+        client.write_register(0xC34B,0x000B,slave_address)
         meter_availability = client.read_holding_registers(0xC34B,1,slave_address).registers[0]
-        if(meter_availability == 0 or meter_availability == 0x0B00):            
-            client.write_register(0xC34B,0x000B,slave_address)
-            meter_availability = client.read_holding_registers(0xC34B,1,slave_address).registers[0]
-            if(meter_availability != 0x0B00):
-                status_lbl.config(text=f"\n /!\ El medidor está ocupado en otra sesión.")
-            else:
-                status_lbl.config(text=f"\n (!) Sesión de recuperación iniciada.")
+        if(meter_availability != 0x0B00):
+            status_lbl.config(text=f"\n /!\ El medidor está ocupado en otra sesión.")
+        else:
+            status_lbl.config(text=f"\n (!) Sesión de recuperación iniciada.")
 
-                # Obtener estado del log
-                # if para cada historico
+            # Obtener estado del log
+            if (log == "Historic 1"):
                 log_status_block_address = 0xC757
                 log_availability_address = 0xC75C
+                log_setup_address = 0x84CF
+                log_number = 2
+            elif (log == "Historic 2"):
+                log_status_block_address = 0xC767
+                log_availability_address = 0xC76C
+                log_setup_address = 0x858F
+                log_number = 3
+            elif (log == "Historic 3"):
+                log_status_block_address = 0xC777
+                log_availability_address = 0xC77C
+                log_setup_address = 0x864F
+                log_number = 4
+            elif (log == "Historic 4"):
+                log_status_block_address = 0xC787
+                log_availability_address = 0xC78C
+                log_setup_address = 0x870F
+                log_number = 5
+            elif (log == "Historic 5"):
+                log_status_block_address = 0xC797
+                log_availability_address = 0xC79C
+                log_setup_address = 0x87CF
+                log_number = 6
+            elif (log == "Historic 6"):
+                log_status_block_address = 0xC7A7
+                log_availability_address = 0xC7AC
+                log_setup_address = 0x888F
+                log_number = 7
+            
 
-                log_status_block = client.read_holding_registers(log_status_block_address,16,slave_address).registers
-                log_size_rec = reg2var(log_status_block[0:2],"UINT32")
-                number_rec_used = reg2var(log_status_block[2:4],"UINT32")
-                rec_size_bytes = reg2var(log_status_block[4],"UINT16")
-                log_availability = reg2var(log_status_block[5],"UINT16")
-                first_rec_tstamp = reg2var(log_status_block[6:9],"TSTAMP")
-                last_rec_tstamp = reg2var(log_status_block[9:12],"TSTAMP")
-                # 4 registros vacios al final
+            log_status_block = client.read_holding_registers(log_status_block_address,16,slave_address).registers
+            log_size_rec = reg2var(log_status_block[0:2],"UINT32")
+            number_rec_used = reg2var(log_status_block[2:4],"UINT32")
+            rec_size_bytes = reg2var(log_status_block[4],"UINT16")
+            log_availability = reg2var(log_status_block[5],"UINT16")
+            first_rec_tstamp = reg2var(log_status_block[6:9],"TSTAMP")
+            last_rec_tstamp = reg2var(log_status_block[9:12],"TSTAMP")
+            # 4 registros vacios al final
+            
+            # Verificar que el log esté disponible
+            if(log_availability == 0 or log_availability == 4):
+                # Acoplar log
+                enable = 1
+                scope = 0 # Normal record
+
+                packed_log_engage = struct.pack('>h',log_number << 8 | enable << 7 | scope)
+                packed_log_engage = struct.unpack('>h',packed_log_engage)[0]          
+                client.write_register(0xC34F,packed_log_engage,slave_address)
                 
-                # Verificar que el log esté disponible
-                if(log_availability == 0 or log_availability == 4):
-                    # Acoplar log
-                    log_number = 2  # Historico 1
-                    enable = 1
-                    scope = 0 # Normal record
-
-                    packed_log_engage = struct.pack('>h',log_number << 8 | enable << 7 | scope)
-                    packed_log_engage = struct.unpack('>h',packed_log_engage)[0]                    
-                    client.write_register(0xC34F,packed_log_engage,slave_address)
-                    
-                    # Revisar que se haya acoplado correctamente
-                    log_availability = client.read_holding_registers(log_availability_address,1,slave_address).registers[0]
-                    if(log_availability == 0):
-                        status_lbl.config(text=f"\n /!\ El log no se ha acoplado correctamente.")
-                        ret_log_wndw.withdraw()
-                    else:
-                        # Obtener ventana
-                        rec_per_window = 246//rec_size_bytes # División que redondea hacia abajo
-                        num_repeats = 1
-                        packed_rec_window = struct.pack('>h',rec_per_window << 8 | num_repeats)
-                        packed_rec_window = struct.unpack('>h',packed_rec_window)[0]
-                        client.write_registers(0xC350,[packed_rec_window,0,0],slave_address)
-
-                        register_count = int(rec_per_window*(rec_size_bytes/2))
-
-                        current_index = 0
-                        export = []                        
-                        while((number_rec_used-current_index) > rec_per_window):
-                            window_offset = client.read_holding_registers(0xC351,2,slave_address).registers
-                            current_index = reg2var(window_offset,"UINT32") & 0x00FFFFFF
-                            window_status = reg2var(window_offset[0],"UINT16") & 0xFF00
-                            print(current_index)
-
-                            # Esperar que el medidor prepara la ventana
-                            while(window_status == 0xFF00):
-                                window_offset = client.read_holding_registers(0xC351,1,slave_address).registers[0]
-                                window_status = reg2var(window_offset,"UINT16") & 0xFF00
-
-                            window_data = client.read_holding_registers(0XC353,register_count,slave_address).registers
-
-                            rec_tstamp = reg2var(window_data[0:3],"TSTAMP")
-                            voltaje = reg2var(window_data[3:7],"FLOAT")
-                            export.append(f"{current_index}: {rec_tstamp} - {voltaje}")
-
-                        # Exportar a un archivo csv 
-                        pd.DataFrame(export).to_csv('DATA.csv',index=False)
-
-
-                    
-
-                else:
-                    status_lbl.config(text=f"\n /!\ El log seleccionado está ocupado por COM{log_availability}.")
-                    # cerrar sesion
+                # Revisar que se haya acoplado correctamente
+                log_availability = client.read_holding_registers(log_availability_address,1,slave_address).registers[0]
+                if(log_availability == 0):
+                    status_lbl.config(text=f"\n /!\ El log no se ha acoplado correctamente.")
                     ret_log_wndw.withdraw()
+                else:
+                    # Revisar log setup
+                    log_reg_per_rec = client.read_holding_registers(log_setup_address,1,slave_address).registers[0]
+                    log_reg_per_rec = (log_reg_per_rec & 0xFF00) >> 8
+                    
+                    historic_vars = client.read_holding_registers(log_setup_address+2,log_reg_per_rec,slave_address).registers
+
+                    rec_titles = ['Timestamp']
+                    rec_var_sizes = [3]
+                    rec_var_types = ['TSTAMP']
+                    for reg in historic_vars:
+                        table_reg_num = reg+1
+                        try:
+                            var_name = reg_table.loc[reg_table['Reg#'] == table_reg_num,'Description'].values[0]
+                            var_size = reg_table.loc[reg_table['Reg#'] == table_reg_num,'Size'].values[0]
+                            var_type = reg_table.loc[reg_table['Reg#'] == table_reg_num,'Format'].values[0]
+                            
+                            if table_reg_num in [18018,18082,18146,18210,18274,18338,18402,18465,18528,18591,18654,18717,18780,18843,18906,18969,19032,19095]:
+                                # Caso especial armónicos y samples
+                                rec_titles.extend([f"{var_name} ({n})" for n in range(1,var_size+1)])
+                                rec_var_sizes.extend([1]*(var_size))
+                                rec_var_types.extend([var_type]*var_size)
+
+                            else:
+                                # Caso normal
+                                rec_titles.append(var_name)
+                                rec_var_sizes.append(var_size)
+                                rec_var_types.append(var_type)
+                        except:
+                            status_lbl.config(text=f"\n /!\ Número de registro [{reg+1}] no encontrado.")
+                    print(rec_titles)
+                    print(rec_var_sizes)
+                    print(rec_var_types)
+
+                    # Obtener ventana
+                    rec_per_window = 246//rec_size_bytes # División que redondea hacia abajo
+                    num_repeats = 1
+                    packed_rec_window = struct.pack('>h',rec_per_window << 8 | num_repeats)
+                    packed_rec_window = struct.unpack('>h',packed_rec_window)[0]
+                    client.write_registers(0xC350,[packed_rec_window,0,0],slave_address)
+
+                    register_count = int(rec_per_window*(rec_size_bytes/2))
+
+                    current_index = 0                        
+                    export_file = [rec_titles]
+                    cont = 0                   
+                    while((number_rec_used-current_index) > rec_per_window): 
+                        logs_lbl.config(text=f"\nRecuperando records [{current_index+1}/{number_rec_used}]")
+                        progressbar["value"] = (current_index/number_rec_used)*100
+                        ret_log_wndw.update_idletasks()
+                        window_offset = client.read_holding_registers(0xC351,2,slave_address).registers
+                        current_index = reg2var(window_offset,"UINT32") & 0x00FFFFFF
+                        window_status = reg2var(window_offset[0],"UINT16") & 0xFF00
+
+                        # Esperar que el medidor prepara la ventana
+                        while(window_status == 0xFF00):
+                            window_offset = client.read_holding_registers(0xC351,1,slave_address).registers[0]
+                            window_status = reg2var(window_offset,"UINT16") & 0xFF00
+
+                        window_data = client.read_holding_registers(0XC353,register_count,slave_address).registers
+                        # Dar formato para el archivo de exportacion
+                        rec_data = []
+                        i_data = 0
+                        i_type = 0
+                        while i_data < len(window_data):
+                            i_type = i_type % len(rec_var_types) # Si una ventana contiene más de un record, reiniciar i_type
+                            format = rec_var_types[i_type]
+                            step = rec_var_sizes[i_type]
+
+                            # Separa cada TSTAMP del record en una nueva linea del CSV
+                            if (format == "TSTAMP" and i_data != 0):
+                                export_file.append(rec_data)
+                                rec_data = []
+
+                            if step != 1:
+                                bytes = window_data[i_data:i_data+step]
+                            else:                                    
+                                bytes = window_data[i_data]
+                                
+                            #try:
+                            value = reg2var(bytes,format)
+                            print(i_type)
+                            if pd.isna(value):
+                                value = 'NaN'
+                            elif '%' in rec_titles[i_type]:
+                                value = value/100
+                                
+                            rec_data.append(value)
+                                
+                            #except:
+                            # El registro contiene varias variables del mismo tipo
+                            '''for byte in bytes:
+                                value = reg2var(byte,format)
+                                if pd.isna(value):
+                                    value = 'NaN'
+                                elif '%' in rec_titles[i_type]:
+                                    value = value/100                                    
+                                rec_data.append(value)'''
+
+                            i_data += step
+                            i_type += 1
+                        
+                                                    
+                        export_file.append(rec_data)
+                        rec_data = []                        
+
+                        if(cont < 5):
+                            cont += 1
+                        else:
+                            break
+                    logs_lbl.config(text=f"\nLog recuperado.")
+
+                    # Exportar el archivo
+                    x = 0
+                    while(True):
+                        try:                            
+                            pd.DataFrame(export_file).to_csv(f"{meter_SN.strip()}_{log}_{x}.csv",index=False,header=False)
+                            status_lbl.config(text=f"\n (!) El archivo fue exportado correctamente.")
+                            break
+                        except:
+                            x += 1
 
 
-                # Iniciar recuperación
+            else:
+                status_lbl.config(text=f"\n /!\ El log seleccionado está ocupado por COM{log_availability}.")
+                # cerrar sesion
+                ret_log_wndw.withdraw()
 
 
-        else:
-            status_lbl.config(text=f"\n /!\ El medidor está ocupado.")
-            # cerrar sesion
-
-        # Header log
-        #client.read_holding_registers(51032,16,slave_address)
-        # Si el registro esta en hexadecimal en el manual, se le suma 1
+            # Iniciar recuperación
 
 
+    else:
+        status_lbl.config(text=f"\n /!\ El medidor está ocupado.")
+        # cerrar sesion
 
-        #client.write_register(49999,0x280,slave_address) #0xc34f
+    # Header log
+    #client.read_holding_registers(51032,16,slave_address)
+    # Si el registro esta en hexadecimal en el manual, se le suma 1
 
-        #client.write_registers(50000,[0x0101,0,0],slave_address)
 
-    except Exception as e:
-        status_lbl.config(text=f"\n (X) No se puedo recuperar el log. {e}")
-        ret_log_wndw.withdraw()
+
+    #client.write_register(49999,0x280,slave_address) #0xc34f
+
+    #client.write_registers(50000,[0x0101,0,0],slave_address)
+
+'''except Exception as e:
+    status_lbl.config(text=f"\n (X) No se pudo recuperar el log. {e}")
+    ret_log_wndw.withdraw()
+    print(export_file)'''
 
 def cancel_retlog_shark270():
     # NO SE CIERRA LA SESION CORRECTAMENTE
@@ -369,16 +485,33 @@ ret_log_wndw = tk.Tk()
 ret_log_wndw.title("Retrieve Log")
 ret_log_wndw.withdraw()
 
-read_btn = tk.Button(ret_log_wndw, text="Retrieve",command=lambda: retlog_shark270())
-read_btn.grid(row=4,column=0)
+ret_log_lbl = tk.Label(ret_log_wndw,text='Log Retrival')
+ret_log_lbl.grid(row=0,columnspan=2)
+
+log_sel_lbl = tk.Label(ret_log_wndw,text='Select log')
+log_sel_lbl.grid(row=1,column=0)
+
+log_selection = tk.StringVar(ret_log_wndw)
+log_selection.set("Historic 1")
+log_list = tk.OptionMenu(ret_log_wndw,log_selection,*["Historic 1","Historic 2","Historic 3","Historic 4","Historic 5","Historic 6"])
+log_list.grid(row=1,column=1)
+
+read_btn = tk.Button(ret_log_wndw, text="Retrieve",command=lambda: retlog_shark270(log_selection.get()))
+read_btn.grid(row=2,column=0)
 
 cancel_retlog_btn = tk.Button(ret_log_wndw, text="Cancel", command=lambda: cancel_retlog_shark270())
-cancel_retlog_btn.grid(row=4,column=1)
+cancel_retlog_btn.grid(row=2,column=1)
+
+logs_lbl = tk.Label(ret_log_wndw,text='\n',justify="left")
+logs_lbl.grid(row=3,columnspan=2)
+
+progressbar = ttk.Progressbar(ret_log_wndw,orient='horizontal',length=200,mode='determinate')
+progressbar.grid(row=4,columnspan=2)
 
 
 # -----------------------------------     Ventana principal (Cinta de opciones)     -----------------------------------
 main_wndw = tk.Tk()
-main_wndw.title("Shark® 270 | MODBUS")
+main_wndw.title("Shark® 270 | MODBUS TCP")
 
 status_lbl = tk.Label(main_wndw,text="\nStatus...",justify="left")
 status_lbl.grid(row=1,column=0,columnspan=10,sticky="w")
