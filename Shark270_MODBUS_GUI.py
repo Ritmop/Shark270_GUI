@@ -1,18 +1,53 @@
 import tkinter as tk
 from tkinter import ttk
+from tkinter import filedialog
 from pymodbus.client import ModbusTcpClient
 import struct
 import pandas as pd
 import os
+import subprocess
 
-# Cambiar el directorio de trabajo a donde está guardado el archivo .py
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
+#  ---------------------------------------------------------------------------------------------------------------------------------
+#                                                             SHARK270 MODBUS GUI
+#  ---------------------------------------------------------------------------------------------------------------------------------
+
+# INTEK Guatemala
+# Junio 2024
+# Desarrollado por:
+#   Judah Pérez
+#   Carlos Valdez
+
+# Este script genera una interfaz gráfica para cominucarse con medidores Shark270. La comunicación se basa en el protocolo MODBUS.
+# Los objetivos principales de la aplicación son:
+#   - Polling: leer registros e interpretarlos en diferentes formatos [TSTAMP,UINT32,SINT32,UINT16,SINT16,FLOAT,ASCII].
+#   - Log Retrival: recuperar logs históricos 1-6.
+
+# NOTAS:
+#   - Enlace a la guía del protocolo MODBUS para el Shark270:
+#       https://www.electroind.com/products/Shark_270/pdf/manuals/Shark-270-Meter-Modbus-Protocol-Application-Guide_E159718.pdf
+#   - El protocolo utilizado es MODBUS TCP.
+#   - Para la recuperación de los logs se utiliza la función de auto-incremento.
+#   - Al recuperar un Histórico se obtiene el log completo, tarea que puede tardar varios minutos en completarse. En ocasiones puede parecer
+#       que la aplicación se ha congelado, sin embargo sigue leyendo información del medidor y la interfaz se actualizará una vez finalizada
+#       la tarea.
+#   - Al acoplar un log se escribe el valor 0x000B.
+#   - La aplicación considera que el medidor no cuenta con seguridad, es decir no contempla un inicio de sesión antes de acceder al medidor.
+#   - Utilizar los botones "Cancel" para cerrar ventanas, NO UTILIZAR LOS BOTONES [X] EN EL ENCABEZADO DE LAS VENTANAS (Genera error
+#       al intentar abrir la ventana nuevamente).
+#   - Los logs son exportados a la carpeta "ExportedLogs" que se crea en la misma ruta donde se encuentre este archivo de python.
+#   - La aplicación utiliza el archivo "Shark270-Meter-Readings-Register-Table.xlsx" para reconocer el nombre y tamaño de los
+#       registros de las mediciones del medidor. Si se obtiene un error durante la recuperación de los logs es posible que el Histórico
+#       contenga una variable que no esté documentada en la tabla de Excel.
+#   - El archivo "Shark270-Meter-Readings-Register-Table.xlsx" debe estar en la misma ruta que este archivo de python.
+
 
 #  ---------------------------------------------------------------------------------------------------------------------------------
 #                                                  Lectura de la tabla de registros MODBUS
 #  ---------------------------------------------------------------------------------------------------------------------------------
 
-file_path = "Shark270_Meter_Readings_Table.xlsx"
+# Cambiar el directorio de trabajo a donde está guardado el archivo .py
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+file_path = "Shark270-Meter-Readings-Register-Table.xlsx"
 reg_table = pd.read_excel(file_path)
 
 #  ---------------------------------------------------------------------------------------------------------------------------------
@@ -20,7 +55,11 @@ reg_table = pd.read_excel(file_path)
 #  ---------------------------------------------------------------------------------------------------------------------------------
 
 # reg2var
-
+# Esta función permite interpretar los registros obtenidos del medidor
+# según el formato en el que está almacenado.
+# Parámetros:
+# registers - lista de bytes para interpretar
+# data_type - formato de interpretación (TSTAMP, UINT32/16, SINT32/16, FLOAT, ASCII )
 def reg2var(registers,data_type):
     if(data_type == "TSTAMP"):
         tstamp_mask = 0x7f0f1f1f3f3f  
@@ -73,19 +112,22 @@ def reg2var(registers,data_type):
 # Esta función establece la conección con el medidor Shark270, utilizando el protocolo Modbus TCP.
 # Se define la dirección IP del medidor, el número de servidor y se obtienen algunos parámetros
 # del medidor como número de serie y modelo.
-def connect_shark270(server_address,host_ip,port):
+# Parámetros:
+# server_address - número de esclavo del medidor
+# ip - dirección IP del medidor
+# port - puerto de conexión, 502 por defecto
+def connect_shark270(server_address,ip,port):
     try:
         # Iniciar cliente
         global slave_address
         slave_address = server_address
         global client
-        client = ModbusTcpClient(host=host_ip,port=port)
+        client = ModbusTcpClient(host=ip,port=port)
         client.connect()
 
         # Secuencia de acceso
         try:
             # Obtener identificaciones del medidor
-            # Nombre: 0,8   Numero de serie: 8,16 
             id_request = client.read_holding_registers(0,16,slave_address).registers
             type_request = client.read_holding_registers(26,4,slave_address).registers
         except Exception as e:
@@ -97,7 +139,7 @@ def connect_shark270(server_address,host_ip,port):
         global meter_SN
         meter_SN   = reg2var(id_request[8:16],"ASCII")
         meter_type = reg2var(type_request,"ASCII")
-        status_lbl.config(text=f"\n (!) Conectado\n IP:\t{host_ip}:{port}\n Model:\t{meter_type}\n SN:\t{meter_SN}\n Name:\t{meter_name}")
+        status_lbl.config(text=f"\n (!) Conectado\n IP:\t{ip}:{port}\n Model:\t{meter_type}\n SN:\t{meter_SN}\n Name:\t{meter_name}")
         connect_btn.config(state="disabled")
         dis_cnct_btn.config(state="active")
         polling_btn.config(state="active")
@@ -107,13 +149,24 @@ def connect_shark270(server_address,host_ip,port):
     except Exception as e:
         status_lbl.config(text="\n(X) Conexión fallida {e}")
         connect_wndw.withdraw()
-        
+
+# disconnect_shark270
+# Esta función termina la conexión con el medidor.       
 def disconnect_shark270():
     connect_btn.configure(state="active")
-    polling_btn.config(state="disabled")
+    polling_btn.config(state="disabled")    
+    ret_log_btn.config(state="disabled")
+    dis_cnct_btn.config(state="disabled")
     status_lbl.config(text="\n(!) Desconectado")
     client.close()
 
+# leer_shark270
+# Esta es la función que permite leer registros del medidor, integra la función reg2var
+# para interpretar directamente los registros.
+# Parámetros:
+# start_adress - registro donde inicia la lectura
+# address_count - cantidad de registros a leer
+# format - formato para interpretar todos los datos
 def leer_shark270(start_address, address_count, format):
 
     try:
@@ -164,6 +217,18 @@ def leer_shark270(start_address, address_count, format):
         status_lbl.config(text=f"\n (X) Error durante la lectura de registros. {e}")
         polling_wndw.withdraw()
 
+# close_log_session
+# Desacopla el log para permitir el acceso a otros sofwares.
+def close_log_session():
+    log_disengage = client.read_holding_registers(0xC34F,1,slave_address).registers[0] & 0xFF00
+    client.write_register(0xC34F,log_disengage,slave_address)
+
+# retlog_shark270
+# Esta función accede a los logs y los recupera, exportando un archivo .csv en la carpeta "ExportedLogs"
+# que se encuentra en el mismo directorio que el archivo .py, si la carpeta no existe la crea.
+# La secuencia de recuperación sigue los pasos de Modbus "Shark-270-Meter-Modbus-Protocol-Application-Guide_E159718, sección 3"
+# # Parámetros:
+# log - Histórico a recuperar
 def retlog_shark270(log):
     try:
         # Verificar que el medidor esté disponible para una lectura
@@ -172,7 +237,7 @@ def retlog_shark270(log):
             client.write_register(0xC34B,0x000B,slave_address)
             meter_availability = client.read_holding_registers(0xC34B,1,slave_address).registers[0]
             if(meter_availability != 0x0B00): # El medidor realiza un shift automaticamente (<< 4)
-                status_lbl.config(text=f"\n /!\ El medidor está ocupado en otra sesión.")
+                status_lbl.config(text=f"\n /!\\ El medidor está ocupado en otra sesión.")
             else:
                 status_lbl.config(text=f"\n (!) Sesión de recuperación iniciada.")
 
@@ -219,19 +284,20 @@ def retlog_shark270(log):
                 # 4 registros vacios al final
                 
                 # Verificar que el log esté disponible
-                if(log_availability == 0 or log_availability == 4):
+                if(log_availability == 0 ):
                     # Acoplar log
                     enable = 1
                     scope = 0 # Normal record
 
                     packed_log_engage = struct.pack('>h',log_number << 8 | enable << 7 | scope)
-                    packed_log_engage = struct.unpack('>h',packed_log_engage)[0]          
+                    packed_log_engage = struct.unpack('>h',packed_log_engage)[0]
                     client.write_register(0xC34F,packed_log_engage,slave_address)
                     
                     # Revisar que se haya acoplado correctamente
                     log_availability = client.read_holding_registers(log_availability_address,1,slave_address).registers[0]
+                    
                     if(log_availability == 0):
-                        status_lbl.config(text=f"\n /!\ El log no se ha acoplado correctamente.")
+                        status_lbl.config(text=f"\n /!\\ El log no se ha acoplado correctamente.")
                         ret_log_wndw.withdraw()
                     else:
                         # Revisar log setup
@@ -263,7 +329,7 @@ def retlog_shark270(log):
                                     rec_var_sizes.append(var_size)
                                     rec_var_types.append(var_type)
                             except:
-                                status_lbl.config(text=f"\n /!\ Número de registro [{reg+1}] no encontrado.")
+                                status_lbl.config(text=f"\n /!\\ Número de registro [{reg+1}] no encontrado.")
 
                         # Obtener ventana
                         rec_per_window = 246//rec_size_bytes # División que redondea hacia abajo
@@ -277,7 +343,7 @@ def retlog_shark270(log):
                         current_index = 0                        
                         export_file = [rec_titles]
                         cont = 0                   
-                        while((number_rec_used-current_index) > rec_per_window): 
+                        while((number_rec_used-current_index) > rec_per_window):
                             logs_lbl.config(text=f"\nRecuperando records [{current_index+1}/{number_rec_used}]")
                             progressbar["value"] = (current_index/number_rec_used)*100
                             ret_log_wndw.update_idletasks()
@@ -300,8 +366,8 @@ def retlog_shark270(log):
                                 format = rec_var_types[i_type]                                
                                 step = rec_var_sizes[i_type]
 
-                                # Separa cada TSTAMP del record en una nueva linea del CSV
-                                if (format == "TSTAMP" and i_data != 0):
+                                # Separa cada record en una nueva linea del CSV
+                                if (i_type == 0 and i_data != 0):
                                     export_file.append(rec_data)
                                     rec_data = []
                                     i_type = 0
@@ -311,13 +377,25 @@ def retlog_shark270(log):
                                 else:                                    
                                     bytes = window_data[i_data]
 
-                                value = reg2var(bytes,format)
-                                if pd.isna(value):
-                                    value = 'NaN'
-                                elif '%' in rec_titles[i_type]:
-                                    value = value/100
-                                    
-                                rec_data.append(value)
+                                try:
+                                    value = reg2var(bytes,format)          
+                                    if pd.isna(value):
+                                        value = 'NaN'
+                                    elif ('%' in rec_titles[i_type]) or ('Phase' in rec_titles[i_type]):
+                                        value = value/100
+                                        
+                                    rec_data.append(value)
+                                
+                                except:
+                                    # El registro contiene varias variables del mismo tipo
+                                    for byte in bytes:
+                                        value = reg2var(byte,format)
+                                        if pd.isna(value):
+                                            value = 'NaN'
+                                        elif '%' in rec_titles[i_type]:
+                                            value = value/100                                    
+                                        rec_data.append(value)
+                                        
                                 i_data += step
                                 i_type += 1
                             
@@ -325,68 +403,69 @@ def retlog_shark270(log):
                             export_file.append(rec_data)
                             rec_data = []                        
 
-                            # Descomentar para obtener cierta cantidad de records, en lugar del log completo.
-                            '''if(cont < 50):
+                            # Descomentar ciclo if para obtener cierta cantidad de records, en lugar del log completo.
+                            '''if(cont < 10):
                                 cont += 1
                             else:
                                 break'''
+                            
                         logs_lbl.config(text=f"\nLog recuperado.")
 
-                        # Cerrar sesión
-                        print(client.read_holding_registers(49995,1,slave_address).registers[0])  
-                        client.write_register(49995,0x0,slave_address)
-                        print(client.read_holding_registers(49995,1,slave_address).registers[0])
-
-                        print(client.read_holding_registers(49999,1,slave_address).registers[0])
-                        client.write_register(49999,0x0,slave_address)                        
-                        print(client.read_holding_registers(49999,1,slave_address).registers[0])
+                        close_log_session()
 
                         # Exportar el archivo
                         x = 0
-                        while(True):
-                            try:
-                                os.makedirs("ExportedLogs", exist_ok=True)                         
-                                pd.DataFrame(export_file).to_csv(f"ExportedLogs/{meter_SN.strip()}_{log}_{x}.csv",index=False,header=False)
-                                status_lbl.config(text=f"\n (!) El archivo fue exportado correctamente.")
-                                break
-                            except:                                
-                                x += 1
+                        try:
+                            os.makedirs("ExportedLogs", exist_ok=True)                         
+                            pd.DataFrame(export_file).to_csv(f"ExportedLogs/{meter_SN.strip()}_{log}.csv",index=False,header=False)
+                            status_lbl.config(text=f"\n (!) El archivo fue exportado como {meter_SN.strip()}_{log}.csv")
+                        except:                            
+                            while(True):
+                                try:         
+                                    pd.DataFrame(export_file).to_csv(f"ExportedLogs/{meter_SN.strip()}_{log}_{x}.csv",index=False,header=False)
+                                    status_lbl.config(text=f"\n (!) El archivo fue exportado como {meter_SN.strip()}_{log}_{x}.csv")
+                                    break
+                                except:                                                     
+                                    x += 1
 
 
                 else:
-                    status_lbl.config(text=f"\n /!\ El log seleccionado está ocupado por COM{log_availability}.")
-                    # cerrar sesion
+                    close_log_session()
+                    status_lbl.config(text=f"\n /!\\ El log seleccionado está ocupado por COM{log_availability}.")
                     ret_log_wndw.withdraw()
 
 
-                # Iniciar recuperación
-
-
         else:
-            status_lbl.config(text=f"\n /!\ El medidor está ocupado.")
-            # cerrar sesion
-
-        # Header log
-        #client.read_holding_registers(51032,16,slave_address)
-        # Si el registro esta en hexadecimal en el manual, se le suma 1
-
-
-
-        #client.write_register(49999,0x280,slave_address) #0xc34f
-
-        #client.write_registers(50000,[0x0101,0,0],slave_address)
+            status_lbl.config(text=f"\n /!\\ El medidor está ocupado.")
+            close_log_session()
 
     except Exception as e:
+        close_log_session()
         status_lbl.config(text=f"\n (X) No se pudo recuperar el log. {e}")
         ret_log_wndw.withdraw()
 
+# cancel_retlog_shark270
+# Termina la sesión y cierra la ventana ret_log_wndw.
 def cancel_retlog_shark270():
-    # NO SE CIERRA LA SESION CORRECTAMENTE
-    client.write_register(49995,0x0,slave_address) # Semaforo
-    client.write_register(49999,0x0,slave_address)
-    print(client.read_holding_registers(49999,1,slave_address).registers[0])
+    close_log_session()
     status_lbl.config(text=f"\n (!) Sesión de recuperación cancelada.")
     ret_log_wndw.withdraw()
+
+def open_log_file():
+    archivo = filedialog.askopenfilename(
+        title="Seleccionar archivo",
+        filetypes=(("Archivos de texto", "*.csv"), ("Todos los archivos", "*.*")),
+        initialdir="ExportedLogs"
+    )
+    if archivo:
+        try:
+            if os.path.exists(archivo):
+                subprocess.run(["start", "excel", archivo], shell=True)
+            else:
+                status_lbl.config(text=f"El archivo {archivo} no existe.")
+        except Exception as e:
+            status_lbl.config(text=f"Error al intentar abrir el archivo con Excel: {e}")
+
 
 
 #  ---------------------------------------------------------------------------------------------------------------------------------
@@ -524,7 +603,7 @@ meter_mgr_btn = tk.Button(main_wndw, text="Meter Mgr")
 meter_mgr_btn.grid(row=0, column=4)'''
 ret_log_btn = tk.Button(main_wndw, text="Ret Log",state="disabled", command=ret_log_wndw.deiconify)
 ret_log_btn.grid(row=0, column=1)
-open_log_btn = tk.Button(main_wndw, text="Open Log")
+open_log_btn = tk.Button(main_wndw, text="Open Log", command=lambda: open_log_file())
 open_log_btn.grid(row=0, column=2)
 connect_btn = tk.Button(main_wndw, text="Connect", command=connect_wndw.deiconify)
 connect_btn.grid(row=0, column=5)
