@@ -23,7 +23,7 @@ import subprocess
 #   - Log Retrival: recuperar logs históricos 1-6.
 
 # NOTAS:
-#   - Enlace a la guía del protocolo MODBUS para el Shark270:
+#   - Enlace a la guía del protocolo MODBUS para el Shark 270:
 #       https://www.electroind.com/products/Shark_270/pdf/manuals/Shark-270-Meter-Modbus-Protocol-Application-Guide_E159718.pdf
 #   - El protocolo utilizado es MODBUS TCP.
 #   - Para la recuperación de los logs se utiliza la función de auto-incremento.
@@ -595,12 +595,6 @@ main_wndw.title("Shark® 270 | MODBUS TCP")
 status_lbl = tk.Label(main_wndw,text="\nStatus...",justify="left")
 status_lbl.grid(row=1,column=0,columnspan=10,sticky="w")
 
-'''profile_btn = tk.Button(main_wndw, text="Profile")
-profile_btn.grid(row=0, column=0)
-conn_mgr_btn = tk.Button(main_wndw, text="Conn Mgr")
-conn_mgr_btn.grid(row=0, column=3)
-meter_mgr_btn = tk.Button(main_wndw, text="Meter Mgr")
-meter_mgr_btn.grid(row=0, column=4)'''
 ret_log_btn = tk.Button(main_wndw, text="Ret Log",state="disabled", command=ret_log_wndw.deiconify)
 ret_log_btn.grid(row=0, column=1)
 open_log_btn = tk.Button(main_wndw, text="Open Log", command=lambda: open_log_file())
@@ -611,22 +605,7 @@ dis_cnct_btn = tk.Button(main_wndw, text="Dis-cnct",state="disabled", command=la
 dis_cnct_btn.grid(row=0, column=6)
 polling_btn = tk.Button(main_wndw, text="Polling", state="disabled", command=polling_wndw.deiconify)
 polling_btn.grid(row=0, column=7)
-'''energy_btn = tk.Button(main_wndw, text="Energy")
-energy_btn.grid(row=0, column=8)
-hermonic_btn = tk.Button(main_wndw, text="Harmonic")
-hermonic_btn.grid(row=0, column=9)
-phasor_btn = tk.Button(main_wndw, text="Phasor")
-phasor_btn.grid(row=0, column=10)
-flicker_btn = tk.Button(main_wndw, text="Flicker")
-flicker_btn.grid(row=0, column=11)
-log_stats_btn = tk.Button(main_wndw, text="Log Stats")
-log_stats_btn.grid(row=0, column=12)
-dev_stats_btn = tk.Button(main_wndw, text="Dev Stats")
-dev_stats_btn.grid(row=0, column=13)
-alarms_btn = tk.Button(main_wndw, text="Alarms")
-alarms_btn.grid(row=0, column=14)'''
+
 
 # Ejecutar la aplicación
 main_wndw.mainloop()
-
-
